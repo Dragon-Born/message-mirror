@@ -3,9 +3,9 @@
 Always-on Android companion that captures notifications (and optional SMS) on your device and forwards them to a configured HTTP endpoint. Built with Flutter + minimal Kotlin.
 
 <p align="center">
-  <img src="images/1.jpg" alt="Configuration and destination settings" width="160">
-  <img src="images/2.jpg" alt="Permissions and service control" width="160">
-  <img src="images/3.jpg" alt="Logs and retry queue viewer" width="160">
+  <img src="images/1.jpg" alt="Configuration and destination settings" width="180">
+  <img src="images/2.jpg" alt="Permissions and service control" width="180">
+  <img src="images/3.jpg" alt="Logs and retry queue viewer" width="180">
   <br/>
 </p>
 
