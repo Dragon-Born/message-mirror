@@ -14,7 +14,22 @@ class NotifEventReceiver : BroadcastReceiver() {
             "title" to (intent.getStringExtra("title") ?: ""),
             "text" to (intent.getStringExtra("text") ?: ""),
             "when" to intent.getLongExtra("when", 0L),
-            "isGroupSummary" to intent.getBooleanExtra("isGroupSummary", false)
+            "isGroupSummary" to intent.getBooleanExtra("isGroupSummary", false),
+            "subText" to (intent.getStringExtra("subText") ?: ""),
+            "summaryText" to (intent.getStringExtra("summaryText") ?: ""),
+            "bigText" to (intent.getStringExtra("bigText") ?: ""),
+            "infoText" to (intent.getStringExtra("infoText") ?: ""),
+            "people" to (intent.getStringExtra("people") ?: ""),
+            "category" to (intent.getStringExtra("category") ?: ""),
+            "priority" to intent.getIntExtra("priority", 0),
+            "channelId" to (intent.getStringExtra("channelId") ?: ""),
+            "groupKey" to (intent.getStringExtra("groupKey") ?: ""),
+            "visibility" to intent.getIntExtra("visibility", 0),
+            "color" to (intent.getStringExtra("color") ?: ""),
+            "badgeIconType" to intent.getIntExtra("badgeIconType", -1),
+            "actions" to (intent.getStringExtra("actions") ?: ""),
+            "largeIcon" to (intent.getStringExtra("largeIcon") ?: ""),
+            "picture" to (intent.getStringExtra("picture") ?: "")
         )
         try { LogStore.append(context, "NotifEventReceiver -> ${data["title"]}") } catch (_: Exception) {}
 

@@ -53,8 +53,20 @@ android {
             output.outputFileName = "${appName}-v${vName}(${vCode})-${abiFilter}.apk"
         }
     }
+
+    testOptions {
+        unitTests.apply {
+            isIncludeAndroidResources = true
+        }
+    }
 }
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.13")
+    testImplementation("androidx.test:core:1.5.0")
 }

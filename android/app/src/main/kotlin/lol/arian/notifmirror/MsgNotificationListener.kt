@@ -36,8 +36,40 @@ class MsgNotificationListener : NotificationListenerService() {
         val title = extras.getCharSequence("android.title")?.toString() ?: ""
         val text = extras.getCharSequence("android.text")?.toString() ?: ""
         val bigText = extras.getCharSequence("android.bigText")?.toString() ?: ""
-        val lines = extras.getCharSequenceArray("android.textLines")
-            ?.joinToString("\n") { it.toString() } ?: ""
+        val lines = extras.getCharSequenceArray("android.textLines")?.joinToString("\n") { it.toString() } ?: ""
+        val subText = extras.getCharSequence("android.subText")?.toString() ?: ""
+        val summaryText = extras.getCharSequence("android.summaryText")?.toString() ?: ""
+        val infoText = extras.getCharSequence("android.infoText")?.toString() ?: ""
+        val people: String = try {
+            val arr = extras.get("android.people.list") as? ArrayList<*> ?: arrayListOf<Any?>()
+            if (arr.isEmpty()) "" else arr.joinToString(",") { it?.toString() ?: "" }
+        } catch (_: Exception) { "" }
+        val category = n.category ?: ""
+        val priority = n.priority
+        val channelId = try { if (android.os.Build.VERSION.SDK_INT >= 26) n.channelId ?: "" else "" } catch (_: Exception) { "" }
+        val visibility = n.visibility
+        val color = try { if (n.color != 0) String.format("#%08X", n.color) else "" } catch (_: Exception) { "" }
+        val groupKey = try { extras.getString("android.support.groupKey") ?: "" } catch (_: Exception) { "" }
+        val badgeIconType = try { if (android.os.Build.VERSION.SDK_INT >= 26) n.badgeIconType else -1 } catch (_: Exception) { -1 }
+        val actionTitles: String = try { n.actions?.mapNotNull { it?.title?.toString() }?.joinToString("|") ?: "" } catch (_: Exception) { "" }
+        // Large icon and big picture (best-effort, may be absent)
+        val largeIconB64: String = try {
+            val bmp = (extras.get("android.largeIcon") as? android.graphics.Bitmap)
+                ?: run {
+                    if (android.os.Build.VERSION.SDK_INT >= 23) {
+                        val ic = n.getLargeIcon()
+                        if (ic != null) {
+                        val dr = ic.loadDrawable(this)
+                        if (dr != null) drawableToBitmap(dr) else null
+                        } else null
+                    } else null
+                }
+            if (bmp != null) android.util.Base64.encodeToString(toPngBytes(bmp), android.util.Base64.NO_WRAP) else ""
+        } catch (_: Exception) { "" }
+        val pictureB64: String = try {
+            val bmp = extras.get("android.picture") as? android.graphics.Bitmap
+            if (bmp != null) android.util.Base64.encodeToString(toPngBytes(bmp), android.util.Base64.NO_WRAP) else ""
+        } catch (_: Exception) { "" }
 
         val textResolved = if (text.isNotEmpty()) text else if (bigText.isNotEmpty()) bigText else lines
         val isOngoing = (n.flags and Notification.FLAG_ONGOING_EVENT) != 0
@@ -59,6 +91,21 @@ class MsgNotificationListener : NotificationListenerService() {
             putExtra("text", textResolved)
             putExtra("when", sbn.postTime)
             putExtra("isGroupSummary", ((n.flags and 0x00000200) != 0))
+            putExtra("subText", subText)
+            putExtra("summaryText", summaryText)
+            putExtra("bigText", bigText)
+            putExtra("infoText", infoText)
+            putExtra("people", people)
+            putExtra("category", category)
+            putExtra("priority", priority)
+            putExtra("channelId", channelId)
+            putExtra("groupKey", groupKey)
+            putExtra("visibility", visibility)
+            putExtra("color", color)
+            putExtra("badgeIconType", badgeIconType)
+            putExtra("actions", actionTitles)
+            putExtra("largeIcon", largeIconB64)
+            putExtra("picture", pictureB64)
         }
         sendBroadcast(intent)
 
@@ -68,7 +115,22 @@ class MsgNotificationListener : NotificationListenerService() {
             "title" to title,
             "text" to textResolved,
             "when" to sbn.postTime,
-            "isGroupSummary" to ((n.flags and 0x00000200) != 0)
+            "isGroupSummary" to ((n.flags and 0x00000200) != 0),
+            "subText" to subText,
+            "summaryText" to summaryText,
+            "bigText" to bigText,
+            "infoText" to infoText,
+            "people" to people,
+            "category" to category,
+            "priority" to priority,
+            "channelId" to channelId,
+            "groupKey" to groupKey,
+            "visibility" to visibility,
+            "color" to color,
+            "badgeIconType" to badgeIconType,
+            "actions" to actionTitles,
+            "largeIcon" to largeIconB64,
+            "picture" to pictureB64
         )
         val ch = channel
         if (ch != null) {
@@ -99,4 +161,23 @@ class MsgNotificationListener : NotificationListenerService() {
         super.onListenerDisconnected()
         try { LogStore.append(this, "MsgListener onListenerDisconnected") } catch (_: Exception) {}
     }
+}
+
+private fun toPngBytes(bmp: android.graphics.Bitmap): ByteArray {
+    val stream = java.io.ByteArrayOutputStream()
+    bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, stream)
+    return stream.toByteArray()
+}
+
+private fun drawableToBitmap(drawable: android.graphics.drawable.Drawable): android.graphics.Bitmap {
+    if (drawable is android.graphics.drawable.BitmapDrawable) {
+        drawable.bitmap?.let { return it }
+    }
+    val width = if (drawable.intrinsicWidth > 0) drawable.intrinsicWidth else 96
+    val height = if (drawable.intrinsicHeight > 0) drawable.intrinsicHeight else 96
+    val bmp = android.graphics.Bitmap.createBitmap(width, height, android.graphics.Bitmap.Config.ARGB_8888)
+    val canvas = android.graphics.Canvas(bmp)
+    drawable.setBounds(0, 0, canvas.width, canvas.height)
+    drawable.draw(canvas)
+    return bmp
 }

@@ -20,7 +20,7 @@ Always-on Android companion that captures notifications (and optional SMS) on yo
 - Robust delivery: events bridged to Dart; native HTTP fallback if Dart not ready; retry queue with exponential backoff
 - Persistent settings: reception, endpoint, allowed packages, SMS toggle; queue persists across restarts
 - Logs: in-app screen plus mirrored to logcat (`tag: MsgMirror`), with copy/clear/auto refresh
-- Queue viewer: in-app screen to review pending, unsent items
+- Queue viewer: in-app screen to review pending, unsent items; includes a Force Retry action
 
 ## Permissions & Manifest
 
@@ -69,7 +69,8 @@ Registered components:
 Payload notes:
 - By default, `app` and `type` are included (type is `notification` or `sms`).
 - `reception` is included when configured in settings.
-- The payload template supports placeholders: `{{body}}`, `{{from}}`, `{{date}}`, `{{app}}`, `{{type}}`.
+- The payload template supports placeholders: `{{body}}`, `{{from}}`, `{{date}}`, `{{app}}`, `{{type}}`, `{{reception}}`.
+- Additional notification fields are captured and can be used in templates (if present on the device/notification): `{{title}}`, `{{text}}`, `{{when}}`, `{{isGroupSummary}}`, `{{subText}}`, `{{summaryText}}`, `{{bigText}}`, `{{infoText}}`, `{{people}}`, `{{category}}`, `{{priority}}`, `{{channelId}}`, `{{actions}}`, `{{groupKey}}`, `{{visibility}}`, `{{color}}`, `{{badgeIconType}}`, `{{largeIcon}}` (base64 PNG), `{{picture}}` (base64 PNG).
 
 ## Dart Files (Key)
 
@@ -160,6 +161,13 @@ Payload notes:
   - Verify Endpoint and Reception; see `POST done: status=...` or error
   - Some OEMs block background networking without whitelist
   - Ensure Data Saver is OFF or app is whitelisted (Unrestricted data)
+- If your webhook becomes available after a period of downtime and you want to immediately drain the queue, open the Queue screen and tap “Force Retry”. This triggers an immediate attempt and logs the action in the Logs screen.
+
+## Queue & Retries
+
+- Failed sends are queued in a persistent retry queue and retried with exponential backoff up to 60 seconds between attempts.
+- The queue is restored on app/service restart and retries resume automatically.
+- Use the Queue screen’s “Force Retry” button to trigger an immediate pass over the queue (continues scheduling if items remain).
 - SMS not forwarding:
   - Enable “Enable SMS observer” and grant READ_SMS
   - Some devices restrict SMS access

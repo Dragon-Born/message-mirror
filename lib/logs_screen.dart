@@ -31,6 +31,15 @@ class _QueueScreenState extends State<QueueScreen> {
     setState(() { _future = Prefs.getRetryQueue(); });
   }
 
+  Future<void> _forceRetry() async {
+    try {
+      const MethodChannel ch = MethodChannel('msg_mirror_ctrl');
+      await ch.invokeMethod('forceFlushRetry');
+      await Logger.d('Force Retry invoked from UI');
+    } catch (_) {}
+    _refresh();
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -74,6 +83,11 @@ class _QueueScreenState extends State<QueueScreen> {
             onPressed: _refresh,
             icon: Icon(Icons.refresh_rounded, color: colorScheme.onSurfaceVariant),
             tooltip: 'Refresh Queue',
+          ),
+          IconButton(
+            onPressed: _forceRetry,
+            icon: Icon(Icons.playlist_remove_rounded, color: colorScheme.onSurfaceVariant),
+            tooltip: 'Force Retry',
           ),
           const SizedBox(width: 8),
         ],

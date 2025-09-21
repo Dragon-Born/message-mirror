@@ -4,6 +4,20 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:message_mirror/logger.dart';
 import 'package:message_mirror/prefs.dart';
+import 'package:message_mirror/template_renderer.dart';
+
+abstract class RetryQueueStore {
+  Future<List<Map<String, dynamic>>> get();
+  Future<void> set(List<Map<String, dynamic>> items);
+}
+
+class PrefsRetryQueueStore implements RetryQueueStore {
+  @override
+  Future<List<Map<String, dynamic>>> get() => Prefs.getRetryQueue();
+
+  @override
+  Future<void> set(List<Map<String, dynamic>> items) => Prefs.setRetryQueue(items);
+}
 
 class MessageStream {
   static const MethodChannel _channel = MethodChannel('msg_mirror');
@@ -20,8 +34,12 @@ class MessageStream {
   static const int _maxBackoffMs = 60000;
   Timer? _retryTimer;
   static const int _retryCap = 50;
+  final http.Client _http;
+  final RetryQueueStore _queueStore;
 
-  MessageStream({required this.reception, String? endpoint}) {
+  MessageStream({required this.reception, String? endpoint, http.Client? httpClient, RetryQueueStore? queueStore})
+      : _http = httpClient ?? http.Client(),
+        _queueStore = queueStore ?? PrefsRetryQueueStore() {
     if (endpoint != null && endpoint.isNotEmpty) {
       this.endpoint = endpoint;
     }
@@ -73,6 +91,10 @@ class MessageStream {
             await Logger.d('SMS payload skipped (empty body)');
           }
           break;
+        case 'forceRetry':
+          await Logger.d('Force retry requested');
+          await _flushRetryQueue(force: true);
+          break;
       }
     } catch (err) {
       await Logger.e('Handler error: $err');
@@ -86,6 +108,21 @@ class MessageStream {
     final String text = (m['text'] ?? '').toString().trim();
     final bool isGroupSummary = (m['isGroupSummary'] ?? false) == true;
     final int whenMs = (m['when'] is int) ? (m['when'] as int) : 0;
+    final String subText = (m['subText'] ?? '').toString();
+    final String summaryText = (m['summaryText'] ?? '').toString();
+    final String bigText = (m['bigText'] ?? '').toString();
+    final String infoText = (m['infoText'] ?? '').toString();
+    final String people = (m['people'] ?? '').toString();
+    final String largeIcon = (m['largeIcon'] ?? '').toString();
+    final String picture = (m['picture'] ?? '').toString();
+    final String category = (m['category'] ?? '').toString();
+    final String priority = (m['priority'] ?? '').toString();
+    final String channelId = (m['channelId'] ?? '').toString();
+    final String actions = (m['actions'] ?? '').toString();
+    final String groupKey = (m['groupKey'] ?? '').toString();
+    final String visibility = (m['visibility'] ?? '').toString();
+    final String color = (m['color'] ?? '').toString();
+    final String badgeIconType = (m['badgeIconType'] ?? '').toString();
     // Skip obvious ongoing/background work notifications
     if (text.contains('doing work in the background')) {
       Logger.d('Skip background-work notification');
@@ -116,13 +153,36 @@ class MessageStream {
       return null;
     }
     final dateStr = _formatDate(DateTime.fromMillisecondsSinceEpoch(whenMs == 0 ? DateTime.now().millisecondsSinceEpoch : whenMs));
-    return _renderPayload(
+    final extraValues = <String, String>{
+      'title': title,
+      'text': text,
+      'when': whenMs.toString(),
+      'isGroupSummary': isGroupSummary.toString(),
+      'subText': subText,
+      'summaryText': summaryText,
+      'bigText': bigText,
+      'infoText': infoText,
+      'people': people,
+      'largeIcon': largeIcon,
+      'picture': picture,
+      'category': category,
+      'priority': priority,
+      'channelId': channelId,
+      'actions': actions,
+      'groupKey': groupKey,
+      'visibility': visibility,
+      'color': color,
+      'badgeIconType': badgeIconType,
+    };
+    final base = _renderPayload(
       from: title,
       body: body,
       date: dateStr,
       app: app,
       type: 'notification',
+      extraValues: extraValues,
     );
+    return base;
   }
   Future<Set<String>> _getAllowedPackages() async {
     try {
@@ -154,7 +214,7 @@ class MessageStream {
     );
   }
 
-  Map<String, dynamic> _renderPayload({required String from, required String body, required String date, required String app, required String type}) {
+  Map<String, dynamic> _renderPayload({required String from, required String body, required String date, required String app, required String type, Map<String, String>? extraValues}) {
     final defaultPayload = <String, dynamic>{
       'message_body': body,
       'message_from': from,
@@ -162,38 +222,32 @@ class MessageStream {
       'app': app,
       'type': type,
     };
+    if (reception.isNotEmpty) defaultPayload['reception'] = reception;
     final tpl = payloadTemplate;
     if (tpl == null || tpl.trim().isEmpty) {
-      if (reception.isNotEmpty) defaultPayload['reception'] = reception;
       return defaultPayload;
     }
-    // Replace placeholders in user template and parse JSON
-    final rendered = tpl
-        .replaceAll('{{body}}', _escapeJson(body))
-        .replaceAll('{{from}}', _escapeJson(from))
-        .replaceAll('{{date}}', _escapeJson(date))
-        .replaceAll('{{app}}', _escapeJson(app))
-        .replaceAll('{{type}}', _escapeJson(type))
-        .replaceAll('{{reception}}', _escapeJson(reception));
-    try {
-      final map = jsonDecode(rendered) as Map<String, dynamic>;
-      return map;
-    } catch (_) {
-      // Fallback to default if template invalid
-      if (reception.isNotEmpty) defaultPayload['reception'] = reception;
-      return defaultPayload;
+    final values = <String, String>{
+      'body': body,
+      'from': from,
+      'date': date,
+      'app': app,
+      'type': type,
+      'reception': reception,
+    };
+    if (extraValues != null && extraValues.isNotEmpty) {
+      values.addAll(extraValues);
     }
+    final map = TemplateRenderer.render(tpl, values, fallback: defaultPayload);
+    return map;
   }
 
-  String _escapeJson(String v) {
-    // Minimal escape for JSON string context in templates
-    return v.replaceAll('\\', r'\\').replaceAll('"', r'\"').replaceAll('\n', r'\n');
-  }
+  
 
   Future<bool> _sendToApi(Map<String, dynamic> payload) async {
     final uri = Uri.parse(endpoint);
     try {
-      final resp = await http
+      final resp = await _http
           .post(
         uri,
         headers: {'Content-Type': 'application/json'},
@@ -224,25 +278,35 @@ class MessageStream {
   void _scheduleRetry() {
     _retryTimer?.cancel();
     _retryTimer = Timer(Duration(milliseconds: _backoffMs), _flushRetryQueue);
+    Logger.d('Retry scheduled in ${_backoffMs}ms (queue=${_retryQueue.length})');
     _backoffMs = (_backoffMs * 2).clamp(2000, _maxBackoffMs);
   }
 
-  Future<void> _flushRetryQueue() async {
+  Future<void> _flushRetryQueue({bool force = false}) async {
     if (_retryQueue.isEmpty) {
       _backoffMs = 2000;
       return;
     }
-    // Try one by one; stop on first failure and reschedule
+    await Logger.d('Retry flush start: size=${_retryQueue.length} force=$force');
     final current = List<Map<String, dynamic>>.from(_retryQueue);
     _retryQueue.clear();
     for (final payload in current) {
       final ok = await _sendToApi(payload);
       if (!ok) {
         _retryQueue.add(payload);
+        if (!force) {
+          // Stop early on first failure in normal mode to respect backoff pacing
+          break;
+        }
       }
     }
     await _persistQueue();
+    await Logger.d('Retry flush done: remaining=${_retryQueue.length}');
     if (_retryQueue.isNotEmpty) {
+      if (force) {
+        // On force, schedule next attempt with minimal backoff
+        _backoffMs = 2000;
+      }
       _scheduleRetry();
     } else {
       _backoffMs = 2000;
@@ -251,13 +315,13 @@ class MessageStream {
 
   Future<void> _persistQueue() async {
     try {
-      await Prefs.setRetryQueue(_retryQueue);
+      await _queueStore.set(_retryQueue);
     } catch (_) {}
   }
 
   Future<void> _restoreQueue() async {
     try {
-      final items = await Prefs.getRetryQueue();
+      final items = await _queueStore.get();
       _retryQueue.clear();
       _retryQueue.addAll(items);
       if (_retryQueue.isNotEmpty) {
@@ -287,5 +351,32 @@ class MessageStream {
     final h = two(dt.hour);
     final mi = two(dt.minute);
     return '$y-$mo-$d $h:$mi';
+  }
+
+  // Test helpers
+  List<Map<String, dynamic>> debugGetQueue() => List<Map<String, dynamic>>.from(_retryQueue);
+  int debugGetBackoffMs() => _backoffMs;
+  Future<void> debugFlushRetryQueue({bool force = false}) => _flushRetryQueue(force: force);
+  void debugEnqueueRetry(Map<String, dynamic> payload) => _enqueueRetry(payload);
+  void dispose() { _retryTimer?.cancel(); }
+
+  Future<void> debugProcessSms(Map<String, dynamic> args) async {
+    final payload = _buildSmsPayload(args);
+    if (payload != null) {
+      final ok = await _sendToApi(payload);
+      if (!ok) {
+        _enqueueRetry(payload);
+      }
+    }
+  }
+
+  Future<void> debugProcessNotification(Map<String, dynamic> args) async {
+    final payload = await _buildNotifPayload(args);
+    if (payload != null) {
+      final ok = await _sendToApi(payload);
+      if (!ok) {
+        _enqueueRetry(payload);
+      }
+    }
   }
 }

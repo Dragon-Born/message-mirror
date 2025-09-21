@@ -18,15 +18,24 @@ import io.flutter.embedding.engine.dart.DartExecutor
 import io.flutter.plugin.common.MethodChannel
 
 class AlwaysOnService : Service() {
+    companion object {
+        // Testing flag to avoid loading Flutter native engine in unit tests
+        @JvmStatic var testSkipEngine: Boolean = false
+    }
 
     private var engine: FlutterEngine? = null
     private var smsObserver: SmsObserver? = null
+    private var msgChannel: MethodChannel? = null
 
     override fun onCreate() {
         super.onCreate()
         LogStore.append(this, "AlwaysOnService onCreate")
         startAsForeground()
-        initFlutterEngine()
+        if (testSkipEngine) {
+            LogStore.append(this, "AlwaysOnService skipping engine init (test)")
+        } else {
+            initFlutterEngine()
+        }
         try {
             val prefs = getSharedPreferences("msg_mirror", MODE_PRIVATE)
             prefs.edit().putBoolean("service_running", true).apply()
@@ -92,6 +101,43 @@ class AlwaysOnService : Service() {
                 "setSmsEnabled" -> {
                     val v = (call.arguments as? Boolean) ?: true
                     prefs.edit().putBoolean("sms_enabled", v).apply()
+                    // Dynamically register/unregister observer
+                    try { toggleSmsObserver(v) } catch (_: Exception) {}
+                    result.success(null)
+                }
+                // Parity with MainActivity prefs channel for background engine
+                "getAllowedPackages" -> {
+                    val set = prefs.getStringSet("allowed_packages", setOf()) ?: setOf()
+                    result.success(set.toList())
+                }
+                "setAllowedPackages" -> {
+                    val list = (call.arguments as? List<*>)?.mapNotNull { it as? String } ?: emptyList()
+                    prefs.edit().putStringSet("allowed_packages", list.toSet()).apply()
+                    result.success(null)
+                }
+                "getRetryQueue" -> {
+                    result.success(prefs.getString("retry_queue", "[]"))
+                }
+                "setRetryQueue" -> {
+                    val v = call.arguments as? String ?: "[]"
+                    prefs.edit().putString("retry_queue", v).apply()
+                    result.success(null)
+                }
+                "getPayloadTemplate" -> {
+                    val def = (
+                        """
+                        {
+                          "message_body": "{{body}}",
+                          "message_from": "{{from}}",
+                          "message_date": "{{date}}"
+                        }
+                        """
+                    ).trimIndent()
+                    result.success(prefs.getString("payload_template", def))
+                }
+                "setPayloadTemplate" -> {
+                    val v = (call.arguments as? String) ?: ""
+                    prefs.edit().putString("payload_template", v).apply()
                     result.success(null)
                 }
                 else -> result.notImplemented()
@@ -100,6 +146,7 @@ class AlwaysOnService : Service() {
 
         // Message channel
         val channel = MethodChannel(messenger, "msg_mirror")
+        msgChannel = channel
         MsgNotificationListener.setChannelAndFlush(channel)
 
         // Now run Dart entrypoint
@@ -144,4 +191,36 @@ class AlwaysOnService : Service() {
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    private fun toggleSmsObserver(enable: Boolean) {
+        if (enable) {
+            if (checkSelfPermission(Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED) {
+                if (smsObserver == null) {
+                    val ch = msgChannel
+                    if (ch != null) {
+                        smsObserver = SmsObserver(this, ch)
+                        contentResolver.registerContentObserver(
+                            Telephony.Sms.Inbox.CONTENT_URI,
+                            true,
+                            smsObserver as SmsObserver
+                        )
+                        LogStore.append(this, "SmsObserver registered (toggle)")
+                    } else {
+                        LogStore.append(this, "SmsObserver toggle failed: no channel")
+                    }
+                }
+            } else {
+                LogStore.append(this, "SmsObserver toggle skipped: no permission")
+            }
+        } else {
+            smsObserver?.let {
+                try { contentResolver.unregisterContentObserver(it) } catch (_: Exception) {}
+            }
+            smsObserver = null
+            LogStore.append(this, "SmsObserver unregistered (toggle)")
+        }
+    }
+
+    // Test helper
+    fun debugToggleSmsObserver(enable: Boolean) { toggleSmsObserver(enable) }
 }

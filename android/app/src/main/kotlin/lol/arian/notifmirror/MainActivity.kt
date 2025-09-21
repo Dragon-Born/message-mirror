@@ -55,6 +55,22 @@ class MainActivity : FlutterActivity() {
                         val p = getSharedPreferences("msg_mirror", Context.MODE_PRIVATE)
                         result.success(p.getBoolean("service_running", false))
                     }
+                    "forceFlushRetry" -> {
+                        // Relay a 'forceRetry' call to any active Flutter engines (UI and background)
+                        runOnUiThread {
+                            try {
+                                io.flutter.embedding.engine.FlutterEngineCache.getInstance().get("ui_engine")?.let { eng ->
+                                    MethodChannel(eng.dartExecutor.binaryMessenger, "msg_mirror").invokeMethod("forceRetry", null)
+                                }
+                            } catch (_: Exception) {}
+                            try {
+                                io.flutter.embedding.engine.FlutterEngineCache.getInstance().get("always_on_engine")?.let { eng ->
+                                    MethodChannel(eng.dartExecutor.binaryMessenger, "msg_mirror").invokeMethod("forceRetry", null)
+                                }
+                            } catch (_: Exception) {}
+                            result.success(null)
+                        }
+                    }
                     else -> result.notImplemented()
                 }
             }
